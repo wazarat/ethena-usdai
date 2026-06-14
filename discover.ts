@@ -19,6 +19,7 @@ export interface VerifyResult {
   rowCount: number;
   sample: Record<string, unknown>[];
   error?: string;
+  looksLikeRawEvents?: boolean;
 }
 
 /** Read the rotated Dune API key from the environment, failing loudly if absent. */
@@ -103,6 +104,29 @@ export function detectColumns(rows: Record<string, unknown>[]): {
   return { dateColumn, valueColumn };
 }
 
+/**
+ * Detect whether result rows look like RAW EVENT data (individual mint/burn
+ * transactions) rather than a daily supply series. Event-shaped queries expose
+ * columns like `tx_hash`, `action`, and a per-event `amount` — charting
+ * block_time vs amount yields a meaningless scatter, not supply over time.
+ *
+ * Heuristic: true when the row keys include at least TWO of `tx_hash`, `action`,
+ * and a per-event amount column named exactly `amount` (case-insensitive).
+ * `tx_hash` + `action` together is itself a strong signal.
+ */
+export function looksLikeRawEvents(rows: Record<string, unknown>[]): boolean {
+  if (rows.length === 0) return false;
+  const keys = Object.keys(rows[0]).map((k) => k.toLowerCase());
+  const hasTxHash = keys.includes("tx_hash");
+  const hasAction = keys.includes("action");
+  const hasAmount = keys.includes("amount");
+
+  if (hasTxHash && hasAction) return true;
+
+  const signals = [hasTxHash, hasAction, hasAmount].filter(Boolean).length;
+  return signals >= 2;
+}
+
 /** Verify a single supply-style query: it runs and exposes a date + numeric column. */
 export async function verifyQuery(label: string, queryId: string): Promise<VerifyResult> {
   try {
@@ -119,6 +143,17 @@ export async function verifyQuery(label: string, queryId: string): Promise<Verif
     }
     const { dateColumn, valueColumn } = detectColumns(rows);
     const ok = Boolean(dateColumn && valueColumn);
+    const rawEvents = looksLikeRawEvents(rows);
+    const rawEventsWarning =
+      "⚠️ This looks like RAW EVENT data (mint/burn transactions), not a daily supply series. Charting it directly will NOT show supply over time — fork it and wrap into a cumulative daily series first (see queries/ folder).";
+    const baseError = ok
+      ? undefined
+      : "Could not detect both a date column and a numeric value column.";
+    const error = rawEvents
+      ? baseError
+        ? `${baseError} ${rawEventsWarning}`
+        : rawEventsWarning
+      : baseError;
     return {
       label,
       queryId,
@@ -127,9 +162,8 @@ export async function verifyQuery(label: string, queryId: string): Promise<Verif
       valueColumn,
       rowCount: rows.length,
       sample: rows.slice(0, 3),
-      error: ok
-        ? undefined
-        : "Could not detect both a date column and a numeric value column.",
+      error,
+      looksLikeRawEvents: rawEvents,
     };
   } catch (err) {
     return {
@@ -148,6 +182,11 @@ export function printVerifyResult(r: VerifyResult): void {
   const status = r.ok ? "✅ runs" : "❌ failed";
   console.log(`\n[${r.label}] query ${r.queryId}: ${status}`);
   if (r.error) console.log(`  reason: ${r.error}`);
+  if (r.looksLikeRawEvents) {
+    console.log(
+      "  ⚠️  raw events: this query returns individual mint/burn transactions, not a daily supply series. Wrap it into a cumulative daily series (see queries/ folder) before charting.",
+    );
+  }
   if (r.dateColumn) console.log(`  date column:  ${r.dateColumn}`);
   if (r.valueColumn) console.log(`  value column: ${r.valueColumn}`);
   if (r.sample.length > 0) {
