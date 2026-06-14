@@ -1,0 +1,23 @@
+# Secrets — NEVER commit the rotated Dune API key
+.env
+.env.local
+*.key
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Generated build sheet is regenerated on each run; keep it out of git by default.
+# Comment the next line out if you want to version the generated sheet.
+BUILD_SHEET.md

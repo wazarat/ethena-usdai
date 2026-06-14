@@ -1,0 +1,20 @@
+{
+  "name": "dune-dashboard-builder",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Standalone agent that discovers + verifies Dune queries (Free plan) and emits a paste-ready build sheet for the Ethena vs USD.AI dashboard.",
+  "type": "module",
+  "scripts": {
+    "build": "tsx build.ts",
+    "discover": "tsx discover.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=20.12.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  }
+}
