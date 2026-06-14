@@ -71,14 +71,44 @@ async function promptAndVerify(
   }
 }
 
-function buildSheet(
-  ethena: VerifyResult,
-  usdai: VerifyResult,
-  verdicts: VerifyResult | null,
-): string {
+interface SheetInput {
+  ethena: VerifyResult;
+  usdai: VerifyResult;
+  usde: VerifyResult | null;
+  usdaiTotal: VerifyResult | null;
+  verdicts: VerifyResult | null;
+}
+
+function buildSheet({ ethena, usdai, usde, usdaiTotal, verdicts }: SheetInput): string {
+  const hasSecondary = Boolean(usde && usdaiTotal);
+
   const verdictLine = verdicts
     ? `   - Verified: query ${verdicts.queryId} returned ${verdicts.rowCount} sample row(s).`
     : `   - No verdicts query ID was provided/verified. Open your saved query on ${VERDICT_TABLE}.`;
+
+  // Secondary (total-supply) table rows — only included when both verified.
+  const secondaryRows = hasSecondary
+    ? `| USDe supply (secondary) | ${usde!.queryId} | \`${usde!.dateColumn}\` | \`${usde!.valueColumn}\` |\n| USDai supply (secondary) | ${usdaiTotal!.queryId} | \`${usdaiTotal!.dateColumn}\` | \`${usdaiTotal!.valueColumn}\` |\n`
+    : "";
+
+  // Secondary assembly steps + the extra dashboard row, only when verified.
+  const secondarySteps = hasSecondary
+    ? `3. Open query ${usde!.queryId} → Run → New visualization → Line chart
+   - X = \`${usde!.dateColumn}\`   Y = \`${usde!.valueColumn}\`   Title: "USDe supply"
+4. Open query ${usdaiTotal!.queryId} → Run → New visualization → Line chart
+   - X = \`${usdaiTotal!.dateColumn}\`   Y = \`${usdaiTotal!.valueColumn}\`   Title: "USDai supply"
+`
+    : "";
+
+  // Renumber the verdicts/dashboard steps based on whether the secondary row exists.
+  const verdictsStepNo = hasSecondary ? 5 : 3;
+  const dashStepNo = hasSecondary ? 6 : 4;
+  const copyStepNo = hasSecondary ? 7 : 5;
+  const secondaryDashRow = hasSecondary
+    ? `   - Row 3: USDe supply | USDai supply  (secondary, side by side)\n`
+    : "";
+  const verdictRowNo = hasSecondary ? 4 : 3;
+  const tableRowNo = hasSecondary ? 5 : 4;
 
   return `# CanHav: Ethena vs USD.AI — Build Sheet
 
@@ -88,9 +118,9 @@ function buildSheet(
 ## Verified inputs
 | Chart | Query ID | Date column | Value column |
 |---|---|---|---|
-| sUSDe supply | ${ethena.queryId} | \`${ethena.dateColumn}\` | \`${ethena.valueColumn}\` |
-| sUSDai supply | ${usdai.queryId} | \`${usdai.dateColumn}\` | \`${usdai.valueColumn}\` |
-| Agent verdicts | ${verdicts ? verdicts.queryId : "(provide a saved query on " + VERDICT_TABLE + ")"} | \`ts\` | \`confidence\` |
+| sUSDe supply (primary) | ${ethena.queryId} | \`${ethena.dateColumn}\` | \`${ethena.valueColumn}\` |
+| sUSDai supply (primary) | ${usdai.queryId} | \`${usdai.dateColumn}\` | \`${usdai.valueColumn}\` |
+${secondaryRows}| Agent verdicts | ${verdicts ? verdicts.queryId : "(provide a saved query on " + VERDICT_TABLE + ")"} | \`ts\` | \`confidence\` |
 
 ## CanHav: Ethena vs USD.AI — assembly (Free plan, UI)
 
@@ -98,15 +128,15 @@ function buildSheet(
    - X = \`${ethena.dateColumn}\`   Y = \`${ethena.valueColumn}\`   Title: "sUSDe supply"
 2. Open query ${usdai.queryId} → Run → New visualization → Line chart
    - X = \`${usdai.dateColumn}\`   Y = \`${usdai.valueColumn}\`   Title: "sUSDai supply"
-3. Open your verdicts query → already have a Table; add New → Scatter chart
+${secondarySteps}${verdictsStepNo}. Open your verdicts query → already have a Table; add New → Scatter chart
    - X = \`ts\`   Y = \`confidence\`   Color/Group = \`severity\`   Title: "Agent verdicts"
 ${verdictLine}
-4. New dashboard → "CanHav: Ethena vs USD.AI — Agent Insights"
+${dashStepNo}. New dashboard → "CanHav: Ethena vs USD.AI — Agent Insights"
    - Row 1: text widget — one-line intro
-   - Row 2: sUSDe supply | sUSDai supply  (side by side)
-   - Row 3: Agent verdicts scatter (full width, under the charts)
-   - Row 4: verdict table (rationale text)
-5. Copy dashboard URL.
+   - Row 2: sUSDe supply | sUSDai supply  (primary, side by side)
+${secondaryDashRow}   - Row ${verdictRowNo}: Agent verdicts scatter (full width, under the charts)
+   - Row ${tableRowNo}: verdict table (rationale text)
+${copyStepNo}. Copy dashboard URL.
 
 ## Hand-off to CanHav
 Paste into CanHav → Agent page → Dune panel → Dashboard URL:
@@ -145,9 +175,29 @@ async function main(): Promise<void> {
 
     if (!ethena || !usdai) {
       console.error(
-        "\nBoth supply queries are required to generate the build sheet. Re-run when you have valid IDs.",
+        "\nBoth primary supply queries are required to generate the build sheet. Re-run when you have valid IDs.",
       );
       process.exit(1);
+    }
+
+    // STEP 2b — optional SECONDARY total-supply pair (USDe + USDai).
+    // Only added to the sheet when BOTH verify; otherwise we warn and skip the row.
+    const usde = await promptAndVerify(
+      rl,
+      "USDe supply (secondary)",
+      process.env.ETHENA_SECONDARY_QUERY_ID,
+      "USDe total supply (secondary): paste dune.com/queries/<ID> (or \"skip\").",
+    );
+    const usdaiTotal = await promptAndVerify(
+      rl,
+      "USDai supply (secondary)",
+      process.env.USDAI_SECONDARY_QUERY_ID,
+      "USDai total supply (secondary): paste dune.com/queries/<ID> (or \"skip\").",
+    );
+    if ((usde && !usdaiTotal) || (!usde && usdaiTotal)) {
+      console.log(
+        "\nℹ️  Only one secondary query verified — the secondary row needs BOTH USDe and USDai, so it will be omitted.",
+      );
     }
 
     // STEP 3 — verify the verdicts source (optional but recommended).
@@ -174,7 +224,7 @@ async function main(): Promise<void> {
     }
 
     // STEP 4 — generate BUILD_SHEET.md.
-    const sheet = buildSheet(ethena, usdai, verdicts);
+    const sheet = buildSheet({ ethena, usdai, usde, usdaiTotal, verdicts });
     const sheetPath = resolve(process.cwd(), "BUILD_SHEET.md");
     writeFileSync(sheetPath, sheet, "utf8");
     console.log(`\n✅ Wrote build sheet → ${sheetPath}`);
