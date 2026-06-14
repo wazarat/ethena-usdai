@@ -20,16 +20,17 @@ import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { verifyQuery, printVerifyResult, type VerifyResult } from "./discover.ts";
 
+// Load .env BEFORE reading any env-derived constants below. Node >= 20.12.
+try {
+  process.loadEnvFile?.();
+} catch {
+  /* .env is optional if vars are already exported */
+}
+
 const NAMESPACE = process.env.DUNE_NAMESPACE?.trim() || "wazarat";
 const VERDICT_TABLE = `dune.${NAMESPACE}.canhav_agent_verdicts`;
-
-function loadEnv(): void {
-  try {
-    process.loadEnvFile?.();
-  } catch {
-    /* .env is optional if vars are already exported */
-  }
-}
+const DASHBOARD_SLUG = process.env.DUNE_DASHBOARD_SLUG?.trim() || "<your-dashboard-slug>";
+const DASHBOARD_URL = `https://dune.com/${NAMESPACE}/${DASHBOARD_SLUG}`;
 
 /** Ask for a query ID, re-verifying until it passes or the user types "skip". */
 async function promptAndVerify(
@@ -42,6 +43,12 @@ async function promptAndVerify(
 
   while (true) {
     if (!id) {
+      // Can only prompt in an interactive terminal. In non-interactive runs
+      // (piped/CI) a missing ID means skip — don't crash on a closed readline.
+      if (!input.isTTY) {
+        console.log(`  ↳ no ${label} ID provided (non-interactive); skipped.`);
+        return null;
+      }
       console.log(`\n${hint}`);
       id = (await rl.question(`Paste the ${label} query ID (or "skip"): `)).trim();
     }
@@ -103,14 +110,12 @@ ${verdictLine}
 
 ## Hand-off to CanHav
 Paste into CanHav → Agent page → Dune panel → Dashboard URL:
-  https://dune.com/${NAMESPACE}/<your-dashboard-slug>
+  ${DASHBOARD_URL}
 Then turn ON "Publish insights to Dune" and Save.
 `;
 }
 
 async function main(): Promise<void> {
-  loadEnv();
-
   console.log("=== Dune Dashboard Builder — Ethena vs USD.AI (Free-plan safe) ===");
   console.log(`Namespace: ${NAMESPACE}`);
   console.log("This tool only READS query results and writes a build sheet. It never");
@@ -178,7 +183,7 @@ async function main(): Promise<void> {
     console.log("\n========================================================");
     console.log("DONE. Follow BUILD_SHEET.md in the Dune UI to assemble the dashboard.");
     console.log("Then paste this into CanHav → Agent page → Dune panel → Dashboard URL:");
-    console.log(`  https://dune.com/${NAMESPACE}/<your-dashboard-slug>`);
+    console.log(`  ${DASHBOARD_URL}`);
     console.log('Then turn ON "Publish insights to Dune" and Save.');
     console.log("========================================================");
   } finally {
